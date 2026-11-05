@@ -1,0 +1,88 @@
+
+
+
+
+
+
+
+
+
+1. Tính năng thiết bị (khách hàng yêu cầu)
+	- Đọc xung nước qua bộ đọc xung SV cung cấp
+	- Đọc áp suất có 2 loại: 
+		Qua i2c (SV sản xuất)
+		Qua cảm biến 4-20 ở chân Press_In
+	- Đọc RS485: cho các loại đồng hồ nước 
+		(Seimen....)
+		
+	- Sản phần chống nước (lắp ở dưới cống).
+		
+		
+2. Tính năng kĩ thuật
+	- Vẫn lấy các tính năng như các loại logger khách
+	- thêm phần tiết kiệm năng lượng
+	- chạy bằng pin có sạc lại (không điều khiển)
+	
+	
+
+3. Cấu hình thiết bị
+
+	3.1  Các loại đồng hồ cần cấu hình
+	
+		at+modinfor=
+															
+	type	loại 								ID default		Baurate							
+	0	woteck (đầu tiền)  							1			9600											
+	1	level 5 mét (hòa bình, sao việt) 			26			9600											
+	1	Level Sence cty HT							1			9600			1,1,2001										
+	2	level cty HT và SUP (màu đỏ)				1			9600											
+	3	EROMAG (MT100)    							1			9600											
+	4	Level ultra (sáng test)						1			9600											
+	5	Sence WM         							1			9600											
+	6	 Woteck Ultrasonic   						1			9600											
+	7	Siemen Móng cái   							1			9600											
+	8	Siemen MAG8000 (Minh khang)					1			19200		1,8,1										
+	9	Máy phát MEBAY      						16			19200		Minh khang MAG6000 (logger k màn hình)			Máy phát: 1,9,16 ; Mag6000: 1,9,1		Đối với loại 2 cổng 485: 2,9,16,1,9,1 ( kênh 1 đọc máy phát, kênh 2 mag 6000)				
+	10	Máy phát POWER START						1			19200											
+	11	Đo nhiệt độ máy phát Sao Việt				26			9600											
+	
+	
+	
+	3.2. Cấu hình server: 
+		main: 154: 7525
+		backup: 177: 7525
+		
+	3.3 Cấu hình 
+	
+4. Các version phần cứng hiện tại
+	- version 1_1_0: phần cứng dùng ic eeprom nhỏ: 256kbit (trong thu
+	- version 1_2_0: phần cứng dùng ic eeprom to: 2Mbit (trong thư mục web tk sáng: thanh_hoa_2mb
+	
+	
+5. Các vấn đề đang giải quyết
+	- Hiện tượng mất kết nối 1 ngày sau đó mới kết nối lại
+		+ đã thay đổi mức ưu tiên của các ngắt, để ngắt rtc cao nhất
+		
+	
+	
+
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+		
+		
+		

@@ -1,0 +1,1570 @@
+
+#include "user_app_sensor.h"
+#include "user_define.h"
+#include "math.h"
+//#include "sd_functions.h"
+#include "rtc.h"
+
+/*============== Function static ===============*/
+static uint8_t fevent_sensor_entry(uint8_t event);
+static uint8_t fevent_sensor_log_tsvh(uint8_t event);
+
+static uint8_t fevent_sensor_data_measure(uint8_t event);
+static uint8_t fevent_sensor_handle_state(uint8_t event);
+static uint8_t fevent_sensor_handle_status(uint8_t event);
+static uint8_t fevent_control_clean_sensor(uint8_t event);
+/*=================== struct ==================*/
+sEvent_struct               sEventAppSensor[] = 
+{
+  {_EVENT_SENSOR_ENTRY,              0, 5, 1000,                 fevent_sensor_entry},
+  {_EVENT_SENSOR_LOG_TSVH,           0, 0, 6000,                 fevent_sensor_log_tsvh},
+  
+  {_EVENT_SENSOR_DATA_MEASURE,       0, 5, 500,                  fevent_sensor_data_measure}, 
+  {_EVENT_SENSOR_HANDLE_STATE,       0, 5, 500,                  fevent_sensor_handle_state},
+  
+  {_EVENT_SENSOR_HANDLE_STATUS,      0, 5, 50,                   fevent_sensor_handle_status},
+  {_EVENT_CONTROL_CLEAN_SENSOR,      0, 5, 50,                   fevent_control_clean_sensor},
+};
+uint8_t DurationTimeWarningSensor = 0;
+
+uint8_t _Cb_Handle_Detect_Power(uint8_t State);
+uint8_t _Cb_Handle_SS_pH(uint8_t State);
+uint8_t _Cb_Handle_SS_Clo(uint8_t State);
+uint8_t _Cb_Handle_SS_EC(uint8_t State);
+uint8_t _Cb_Handle_SS_Turb(uint8_t State);
+
+uint8_t _Cb_Handle_SS_COD(uint8_t State);
+uint8_t _Cb_Handle_SS_TSS(uint8_t State);
+uint8_t _Cb_Handle_SS_NH4(uint8_t State);
+uint8_t _Cb_Handle_SS_DO(uint8_t State);
+
+uint8_t _Cb_Handle_SS_SALT(uint8_t State);
+uint8_t _Cb_Handle_SS_TDS(uint8_t State);
+uint8_t _Cb_Handle_SS_NO3(uint8_t State);
+
+Struct_AverageOneHour       sAverageOneHour[_END_SENSOR] = {0};     //Struct tinh gia tri trung binh trong 1 gio
+
+Struct_MeasureMain sMeasureMain[MAX_CHANNEL_SS][_END_SENSOR] = 
+{
+    // ==================== KÊNH 1 (CH1) ====================
+    {
+      {_SS_TEMP,    OBIS_ENVI_TEMP,     ID_SS_TEMP,         "Temp",         "oC",       0xFE,       0,      0xFE},       // 0 Temperature       
+      {_SS_PH,      OBIS_ENVI_PH_WATER, ID_SS_PH,           "pH",           "-",        0xFE,       0,      0xFE},       // 1 pH          
+      {_SS_CLO,     OBIS_ENVI_CLO,      ID_SS_CLO,          "CLO",          "mg/l",     0xFE,       0,      0xFE},       // 2 Clo        
+      {_SS_EC,      OBIS_ENVI_EC,       ID_SS_EC,           "EC",           "µS/cm",    0x00,       0,      0x00},       // 3 EC          
+      {_SS_TURB,    OBIS_ENVI_TURB,     ID_SS_TURB,         "TURB",         "NTU",      0xFE,       10,     0xFF},       // 4 Turb        
+      {_SS_COD,     OBIS_ENVI_COD,      ID_SS_COD,          "COD",          "mg/l",     0xFE,       0,      0xFE},       // 5 COD         
+      {_SS_TSS,     OBIS_ENVI_TSS,      ID_SS_TSS,          "TSS",          "mg/l",     0xFF,       0,      0xFF},       // 6 TSS             
+      {_SS_NH4,     OBIS_ENVI_NH4,      ID_SS_NH4,          "NH4+",         "mg/l",     0xFE,       0,      0xFE},       // 7 NH4        
+      {_SS_DO,      OBIS_ENVI_OXY_MG_L, ID_SS_DO,           "DO",           "mg/l",     0xFE,       0,      0xFE},       // 8 DO          
+      {_SS_SALT,    OBIS_ENVI_SALT_UNIT,ID_SS_EC,           "SALT",         "%",        0xFE,       0,      0xFE},       // 9 SALT         
+      {_SS_TDS,     OBIS_ENVI_TDS,      ID_SS_EC,           "TDS",          "mg/l",     0x00,       0,      0x00},       //10 TDS
+      {_SS_NO3,     OBIS_ENVI_NO3,      ID_SS_NO3,          "NO3-",         "mg/l",     0xFE,       0,      0xFE},       //11 NO3        
+      {_SS_NH4_N,   OBIS_ENVI_NH4_N,    ID_SS_NH4,          "NH4_N",        "mg/l",     0xFE,       0,      0xFE},       //12 NH4_N        
+      {_SS_NO3_N,   OBIS_ENVI_NO3_N,    ID_SS_NO3,          "NO3_N",        "mg/l",     0xFE,       0,      0xFE},       //13 NO3_N   
+      {_SS_HUMI,    OBIS_ENVI_HUMI_1,   ID_SS_HUMI,         "Humi",         "%",        0xFE,       0,      0xFE},       //14 NO3_N  
+    },
+    
+    // ==================== KÊNH 2 (CH2) ====================
+    {
+      {_SS_TEMP,    OBIS_ENVI_TEMP,     ID_SS_TEMP,         "Temp",         "°C",       0xFE,       0,      0xFE},       // 0 Temperature       
+      {_SS_PH,      OBIS_ENVI_PH_WATER, ID_SS_PH,           "pH",           "-",        0xFE,       0,      0xFE},       // 1 pH          
+      {_SS_CLO,     OBIS_ENVI_CLO,      ID_SS_CLO,          "CLO",          "mg/l",     0xFE,       0,      0xFE},       // 2 Clo        
+      {_SS_EC,      OBIS_ENVI_EC,       ID_SS_EC,           "EC",           "µS/cm",    0x00,       0,      0x00},       // 3 EC          
+      {_SS_TURB,    OBIS_ENVI_TURB,     ID_SS_TURB,         "TURB",         "NTU",      0xFE,       10,     0xFF},       // 4 Turb        
+      {_SS_COD,     OBIS_ENVI_COD,      ID_SS_COD,          "COD",          "mg/l",     0xFE,       0,      0xFE},       // 5 COD         
+      {_SS_TSS,     OBIS_ENVI_TSS,      ID_SS_TSS,          "TSS",          "mg/l",     0xFF,       0,      0xFF},       // 6 TSS             
+      {_SS_NH4,     OBIS_ENVI_NH4,      ID_SS_NH4,          "NH4+",         "mg/l",     0xFE,       0,      0xFE},       // 7 NH4        
+      {_SS_DO,      OBIS_ENVI_OXY_MG_L, ID_SS_DO,           "DO",           "mg/l",     0xFE,       0,      0xFE},       // 8 DO          
+      {_SS_SALT,    OBIS_ENVI_SALT_UNIT,ID_SS_EC,           "SALT",         "%",        0xFE,       0,      0xFE},       // 9 SALT         
+      {_SS_TDS,     OBIS_ENVI_TDS,      ID_SS_EC,           "TDS",          "mg/l",     0x00,       0,      0x00},       //10 TDS
+      {_SS_NO3,     OBIS_ENVI_NO3,      ID_SS_NO3,          "NO3-",         "mg/l",     0xFE,       0,      0xFE},       //11 NO3        
+      {_SS_NH4_N,   OBIS_ENVI_NH4_N,    ID_SS_NH4,          "NH4_N",        "mg/l",     0xFE,       0,      0xFE},       //12 NH4_N        
+      {_SS_NO3_N,   OBIS_ENVI_NO3_N,    ID_SS_NO3,          "NO3_N",        "mg/l",     0xFE,       0,      0xFE},       //13 NO3_N  
+      {_SS_HUMI,    OBIS_ENVI_HUMI_1,   ID_SS_HUMI,         "Humi",         "%",        0xFE,       0,      0xFE},       //14 NO3_N  
+    },
+    
+    // ==================== KÊNH 3 (CH3) ====================
+};
+
+//Struct_SensorWarning        sSensorWarning[] = 
+//{
+//    //e_Name        State_Active             State_Connect_Now                   State_Connect_Befor    Gettick_Handle  _Cb_Handler_SS_Connect
+//  {_SS_TEMP,    &sMeasureMain[_SS_TEMP].sUser, &sMeasureMain[_SS_TEMP].sConnect_u8, _SENSOR_DISCONNECT,    0,               _Cb_Handle_Detect_Power},
+//  {_SS_PH,      &sMeasureMain[_SS_PH].sUser,   &sMeasureMain[_SS_PH].sConnect_u8,   _SENSOR_DISCONNECT,    0,               _Cb_Handle_SS_pH},
+//  {_SS_CLO,     &sMeasureMain[_SS_CLO].sUser,  &sMeasureMain[_SS_CLO].sConnect_u8,  _SENSOR_DISCONNECT,    0,               _Cb_Handle_SS_Clo},
+//  {_SS_EC,      &sMeasureMain[_SS_EC].sUser,   &sMeasureMain[_SS_EC].sConnect_u8,   _SENSOR_DISCONNECT,    0,               _Cb_Handle_SS_EC},
+//  {_SS_TURB,    &sMeasureMain[_SS_TURB].sUser, &sMeasureMain[_SS_TURB].sConnect_u8, _SENSOR_DISCONNECT,    0,               _Cb_Handle_SS_Turb},
+//  
+//  {_SS_COD,     &sMeasureMain[_SS_COD].sUser,  &sMeasureMain[_SS_COD].sConnect_u8,  _SENSOR_DISCONNECT,    0,               _Cb_Handle_SS_COD},
+//  {_SS_TSS,     &sMeasureMain[_SS_TSS].sUser,  &sMeasureMain[_SS_TSS].sConnect_u8,  _SENSOR_DISCONNECT,    0,               _Cb_Handle_SS_TSS},
+//  {_SS_NH4,     &sMeasureMain[_SS_NH4].sUser,  &sMeasureMain[_SS_NH4].sConnect_u8,  _SENSOR_DISCONNECT,    0,               _Cb_Handle_SS_NH4},
+//  {_SS_DO,      &sMeasureMain[_SS_DO].sUser,   &sMeasureMain[_SS_DO].sConnect_u8,   _SENSOR_DISCONNECT,    0,               _Cb_Handle_SS_DO},
+//  {_SS_SALT,    &sMeasureMain[_SS_SALT].sUser, &sMeasureMain[_SS_SALT].sConnect_u8, _SENSOR_DISCONNECT,    0,               _Cb_Handle_SS_SALT},
+//  
+//  {_SS_TDS,     &sMeasureMain[_SS_TDS].sUser,  &sMeasureMain[_SS_TDS].sConnect_u8,  _SENSOR_DISCONNECT,    0,               _Cb_Handle_SS_TDS},
+//  {_SS_NO3,     &sMeasureMain[_SS_NO3].sUser,  &sMeasureMain[_SS_NO3].sConnect_u8,  _SENSOR_DISCONNECT,    0,               _Cb_Handle_SS_NO3},
+//};
+
+//======================================================
+static inline void clear_measure_block(Struct_SS_Value *blk)
+{
+    blk->State_u8 = 0;
+    blk->Value_i32 = 0;
+    blk->Scale_u8 = 0;
+}
+
+static inline void set_measure_block(Struct_SS_Value *blk, float value, uint8_t scale)
+{
+    float stamp  = value;
+    float factor = Calculator_Scale(scale);
+
+    int32_t result = (int32_t)roundf(stamp * factor * 10);
+    result = result/10;
+    
+    blk->State_u8  = 1;
+    blk->Value_i32 = (result >= 0) ? result : 0;
+    blk->Scale_u8  = scale;
+}
+
+/*================= Function Handle ==============*/
+static uint8_t fevent_sensor_entry(uint8_t event)
+{
+//    fevent_enable(sEventAppSensor, _EVENT_SENSOR_HANDLE_STATE);
+    for(uint8_t j = 0; j<MAX_CHANNEL_SS; j++)
+    {
+        for(uint8_t i = 0; i<_END_SENSOR; i++)
+        {
+            sMeasureMain[j][i].nConnect_u8 = 0;
+            sMeasureMain[j][i].sConnect_u8 = _SENSOR_DISCONNECT;
+        }
+    }
+    
+    if(sEventAppSensor[_EVENT_SENSOR_LOG_TSVH].e_status == 1)
+    {
+        Init_UartRs485();
+        RS485_ON;
+        fevent_enable(sEventAppModb, _EVENT_MODB_RS485_1_HANDLE);
+    }
+    
+    return 1;
+}
+
+static uint8_t fevent_sensor_log_tsvh(uint8_t event)
+{
+    char aTEMP[128] = {0};
+    
+    RS485_OFF;
+//    PULSE_OFF;
+    V_PIN_OFF;
+	//Log Data meter to flash
+    UTIL_Printf_Str(DBLEVEL_M, "u_app_wm:log tsvh data\r\n");
+    //
+    Get_RTC();
+
+	AppWm_Get_VBat();
+    AppWm_Get_VOut();
+    
+    sprintf(aTEMP, "u_app_wm: time: %d-%d-%d-%d \r\n%d:%d:%d \r\n", 
+                                    sRTC.day, sRTC.date, sRTC.month, sRTC.year,
+                                    sRTC.hour, sRTC.min, sRTC.sec);
+    UTIL_Printf_Str (DBLEVEL_M, aTEMP);
+    
+    UTIL_MEM_set(aTEMP, 0, sizeof(aTEMP));   
+    sprintf(aTEMP, "u_app_wm: Vpin in: %d mV \r\nVpin out: %d mV \r\n", 
+                    sBattery.mVol_u32, sModemVar.DuraOpera_u32);
+    UTIL_Printf_Str (DBLEVEL_M, aTEMP);
+    
+    if (sWmVar.rIntan_u8 == true) {
+        sWmVar.rIntan_u8 = false;
+    #ifdef USING_APP_SIM
+        sMessage.aMESS_PENDING[DATA_INTAN] = TRUE;
+    #endif
+    } else {
+        AppSensor_Log_Data_TSVH();
+    }
+    
+//    AppSensor_Log_Data_TSVH();
+   
+	return 1;
+}
+
+static uint8_t fevent_sensor_data_measure(uint8_t event)
+{
+    for (uint8_t j = 0; j < MAX_CHANNEL_SS; j++)
+    {
+        for(uint8_t i = _SS_TEMP; i<_END_SENSOR; i++)
+        {
+            if (sMeasureMain[j][i].nConnect_u8 == 0) 
+            {                                
+                sMeasureMain[j][i].sConnect_u8 = _SENSOR_DISCONNECT;             
+                sMeasureMain[j][i].Value_f = 0;
+            } else if (sMeasureMain[j][i].nConnect_u8 >= MAX_COUNT_DISCONNECT) 
+            {
+                sMeasureMain[j][i].sConnect_u8 = _SENSOR_CONNECT;                
+            }   
+            
+            if (sMeasureMain[j][i].sConnect_u8 == _SENSOR_CONNECT)
+            {
+                uint8_t sc = (sMeasureMain[j][i].Value_f <= sMeasureMain[j][i].ParaScale) ? sMeasureMain[j][i].Scale_1 : sMeasureMain[j][i].Scale_2;
+                set_measure_block(&sMeasureMain[j][i].sVal, sMeasureMain[j][i].Value_f, sc);
+            }
+            else clear_measure_block(&sMeasureMain[j][i].sVal);
+        }
+    }
+    fevent_active(sEventAppSensor,_EVENT_SENSOR_HANDLE_STATUS);
+//    fevent_enable(sEventAppSensor, event);
+    return 1;
+}
+
+static uint8_t fevent_sensor_handle_state(uint8_t event)
+{   
+//    static uint8_t i = _SS_TEMP;
+//    
+//    if(*sSensorWarning[i].State_Active == _ACTIVE_SENSOR)
+//    {
+//        if(*sSensorWarning[i].State_Connect_Now != sSensorWarning[i].State_Connect_Befor)
+//        {
+//            sSensorWarning[i].Gettick_Handle = HAL_GetTick();
+//            if(*sSensorWarning[i].State_Connect_Now == _SENSOR_DISCONNECT)
+//                sSensorWarning[i]._Cb_Handler_SS_Connect(*sSensorWarning[i].State_Connect_Now);
+//            
+//            sSensorWarning[i].State_Connect_Befor = *sSensorWarning[i].State_Connect_Now;
+//        }
+//        
+//        if(sSensorWarning[i].State_Connect_Now == _SENSOR_DISCONNECT)
+//        {
+//            if(HAL_GetTick() - sSensorWarning[i].Gettick_Handle >= DurationTimeWarningSensor*60000)
+//            {
+//                sSensorWarning[i].Gettick_Handle = HAL_GetTick();
+//                sSensorWarning[i]._Cb_Handler_SS_Connect(*sSensorWarning[i].State_Connect_Now);
+//            }
+//        }
+//    }
+//    else
+//    {
+//        sSensorWarning[i].Gettick_Handle = HAL_GetTick();
+//    }
+//    
+//    if(i+1 < _END_SENSOR)
+//        i++;
+//    else
+//        i = _SS_TEMP;
+
+    fevent_enable(sEventAppSensor, event);
+    return 0;
+}
+
+static uint8_t fevent_sensor_handle_status(uint8_t event)
+{
+//#ifdef MODBUS_SENSOR_SAOVIET
+//    for(uint8_t i = 0; i < _END_SENSOR; i++)
+//    {
+//        if(sMeasureMain[i].nConnect_u8 == _SENSOR_DISCONNECT)
+//            sMeasureMain[i].State = _E_BAO_LOI_THIET_BI;
+//        else
+//        {
+//            if(StateCalibSensor == 0)
+//                sMeasureMain[i].State = _E_DANG_DO;        
+//            else
+//                sMeasureMain[i].State = _E_HIEU_CHUAN;
+//        }
+//        
+//        sMeasureMain[i].Value_f = sMeasureMain[i].Value_f;
+//    }
+//#else
+    
+    for (uint8_t j = 0; j < MAX_CHANNEL_SS; j++)
+    {
+        for(uint8_t i = 0; i < _END_SENSOR; i++)
+        {
+            #ifdef MODBUS_SENSOR_SAOVIET
+            #else
+                      sMeasureMain[j][i].stateValue = 0x0F & sMeasureMain[j][i].stateValue;
+            #endif
+            if(sMeasureMain[j][i].nConnect_u8 == _SENSOR_DISCONNECT)
+                sMeasureMain[j][i].State = _E_BAO_LOI_THIET_BI;
+            else
+            {
+                #ifdef MODBUS_SENSOR_DARUIFUNO
+                    if(sMeasureMain[j][i].stateSensor == 0x02)
+                        sMeasureMain[j][i].State = _E_HIEU_CHUAN;        
+                    else if(sMeasureMain[j][i].stateSensor == 0x00 || sMeasureMain[j][i].stateSensor == 0x03)
+                    {
+                        if(sMeasureMain[j][i].stateValue== 0x01)
+                          sMeasureMain[j][i].State = _E_DANG_DO;    
+                        else
+                          sMeasureMain[j][i].State = _E_BAO_LOI_THIET_BI;
+                    }
+                    else
+                      sMeasureMain[j][i].State = _E_BAO_LOI_THIET_BI;
+                #else
+                    if(sMeasureMain[j][i].stateSensor == 0x03)
+                        sMeasureMain[j][i].State = _E_HIEU_CHUAN;        
+                    else if(sMeasureMain[j][i].stateSensor == 0x02)
+                    {
+                        if(sMeasureMain[j][i].stateValue== 0x01)
+                          sMeasureMain[j][i].State = _E_DANG_DO;    
+                        else
+                          sMeasureMain[j][i].State = _E_BAO_LOI_THIET_BI;
+                    }
+                    else
+                      sMeasureMain[j][i].State = _E_BAO_LOI_THIET_BI;
+                #endif
+            }
+        }
+    }
+    
+    uint8_t result = 1;
+    for (uint8_t j = 0; j < MAX_CHANNEL_SS; j++)
+    {
+        for(uint8_t i = 0; i < _END_SENSOR; i++)
+        {
+            if(sMeasureMain[j][i].sUser != _INACTIVE_SENSOR)
+            {
+                if(sMeasureMain[j][i].State == _E_BAO_LOI_THIET_BI)
+                    result = 0;
+            }
+        }
+    }
+    
+    if(result == 0)
+    {
+        fevent_active(sEventAppSensor, _EVENT_SENSOR_ENTRY);
+    }
+    else
+    {
+        if(sEventAppSensor[_EVENT_SENSOR_LOG_TSVH].e_status == 1)
+            fevent_active(sEventAppSensor, _EVENT_SENSOR_LOG_TSVH);
+    }
+    
+//#endif
+
+//    fevent_enable(sEventAppSensor, event);
+    return 1; 
+}
+
+static uint8_t fevent_control_clean_sensor(uint8_t event)
+{
+//    static uint8_t first_run = 0;
+//    static uint8_t active = 0;
+//    static uint8_t start_second = 60;
+//    static uint8_t start_min = 60;
+//
+//    if ((first_run == 0)  || sRTC.min == 2 || sRTC.min == 17 || sRTC.min == 32 || sRTC.min == 47)
+//    {
+//        if ((first_run == 0) || ((active == 0) && (start_min != sRTC.min)))
+//        {
+//            first_run = 1;
+//            active = 1;
+//            start_second = sRTC.sec;
+//            start_min    = sRTC.min;
+//            HAL_GPIO_WritePin(DEV_DO_1_GPIO_Port, DEV_DO_1_Pin, GPIO_PIN_SET);
+//            HAL_GPIO_WritePin(DEV_DO_2_GPIO_Port, DEV_DO_2_Pin, GPIO_PIN_SET);
+//            HAL_GPIO_WritePin(DEV_DO_3_GPIO_Port, DEV_DO_3_Pin, GPIO_PIN_SET);
+//            HAL_GPIO_WritePin(DEV_DO_4_GPIO_Port, DEV_DO_4_Pin, GPIO_PIN_SET);
+//        }
+//    }
+//
+//    if (active == 1)
+//    {
+//        uint32_t elapsed = (uint32_t)sRTC.sec - (uint32_t)start_second;
+//
+//        if (elapsed >= 20)
+//        {
+//            active = 0;
+//            HAL_GPIO_WritePin(DEV_DO_1_GPIO_Port, DEV_DO_1_Pin, GPIO_PIN_RESET);
+//            HAL_GPIO_WritePin(DEV_DO_2_GPIO_Port, DEV_DO_2_Pin, GPIO_PIN_RESET);
+//            HAL_GPIO_WritePin(DEV_DO_3_GPIO_Port, DEV_DO_3_Pin, GPIO_PIN_RESET);
+//            HAL_GPIO_WritePin(DEV_DO_4_GPIO_Port, DEV_DO_4_Pin, GPIO_PIN_RESET);
+//        }
+//    }
+//    
+//    fevent_enable(sEventAppSensor, event);
+    return 1; 
+}
+/*====================Function Handle====================*/
+uint8_t _Cb_Handle_Detect_Power(uint8_t State)
+{
+//    uint8_t aData[2] = {0};
+//    aData[0] = 0x00;
+//    aData[1] = 0x00;
+//    Log_EventWarnig(OBIS_WARNING_DETECT_POWER, 0x01, aData);
+    return 1;
+}
+
+uint8_t _Cb_Handle_SS_pH(uint8_t State)
+{
+    uint8_t aData[2] = {0};
+    aData[0] = 0x00;
+    aData[1] = 0x00;
+    Log_EventWarnig(OBIS_WARNING_SENSOR_CONNECT, 0x01, aData);
+    return 1;
+}
+
+uint8_t _Cb_Handle_SS_Clo(uint8_t State)
+{
+    uint8_t aData[2] = {0};
+    aData[0] = 0x02;
+    aData[1] = 0x00;
+    Log_EventWarnig(OBIS_WARNING_SENSOR_CONNECT, 0x01, aData);
+    return 1;
+}
+
+uint8_t _Cb_Handle_SS_EC(uint8_t State)
+{
+    uint8_t aData[2] = {0};
+    aData[0] = 0x04;
+    aData[1] = 0x00;
+    Log_EventWarnig(OBIS_WARNING_SENSOR_CONNECT, 0x01, aData);
+    return 1;
+}
+
+uint8_t _Cb_Handle_SS_Turb(uint8_t State)
+{
+    uint8_t aData[2] = {0};
+    aData[0] = 0x06;
+    aData[1] = 0x00;
+    Log_EventWarnig(OBIS_WARNING_SENSOR_CONNECT, 0x01, aData);
+    return 1;
+}
+
+uint8_t _Cb_Handle_SS_COD(uint8_t State)
+{
+    uint8_t aData[2] = {0};
+    aData[0] = 0x08;
+    aData[1] = 0x00;
+    Log_EventWarnig(OBIS_WARNING_SENSOR_CONNECT, 0x01, aData);
+    return 1;
+}
+
+uint8_t _Cb_Handle_SS_TSS(uint8_t State)
+{
+    uint8_t aData[2] = {0};
+    aData[0] = 0x0A;
+    aData[1] = 0x00;
+    Log_EventWarnig(OBIS_WARNING_SENSOR_CONNECT, 0x01, aData);
+    return 1;
+}
+
+uint8_t _Cb_Handle_SS_NH4(uint8_t State)
+{
+    uint8_t aData[2] = {0};
+    aData[0] = 0x0C;
+    aData[1] = 0x00;
+    Log_EventWarnig(OBIS_WARNING_SENSOR_CONNECT, 0x01, aData);
+    return 1;
+}
+
+uint8_t _Cb_Handle_SS_DO(uint8_t State)
+{
+    uint8_t aData[2] = {0};
+    aData[0] = 0x0E;
+    aData[1] = 0x00;
+    Log_EventWarnig(OBIS_WARNING_SENSOR_CONNECT, 0x01, aData);
+    return 1;
+}
+
+uint8_t _Cb_Handle_SS_SALT(uint8_t State)
+{
+    uint8_t aData[2] = {0};
+    aData[0] = 0x10;
+    aData[1] = 0x00;
+    Log_EventWarnig(OBIS_WARNING_SENSOR_CONNECT, 0x01, aData);
+    return 1;
+}
+
+uint8_t _Cb_Handle_SS_TDS(uint8_t State)
+{
+    uint8_t aData[2] = {0};
+    aData[0] = 0x12;
+    aData[1] = 0x00;
+    Log_EventWarnig(OBIS_WARNING_SENSOR_CONNECT, 0x01, aData);
+    return 1;
+}
+
+uint8_t _Cb_Handle_SS_NO3(uint8_t State)
+{
+    uint8_t aData[2] = {0};
+    aData[0] = 0x14;
+    aData[1] = 0x00;
+    Log_EventWarnig(OBIS_WARNING_SENSOR_CONNECT, 0x01, aData);
+    return 1;
+}
+/*=======================Handle Sensor======================*/
+void Log_EventWarnig(uint8_t Obis, uint8_t LengthData, uint8_t *aDataWaring)
+{
+  Get_RTC();
+  
+  if(sRTC.year > 20)
+  {
+    uint8_t     aData[10]={0};
+    uint16_t    length = 0;
+//    uint16_t	i = 0;
+//    uint8_t     TempCrc = 0;
+    
+    SV_Protocol_Packet_Data(aData, &length, OBIS_TIME_DEVICE, &sRTC, 6, 0xAA);
+    aData[length++] = Obis;
+    aData[length++] = LengthData;
+    
+    for(uint8_t i = 0; i < LengthData; i++)
+        aData[length++] = *(aDataWaring+i);
+    
+//    // caculator crc
+//    length++;
+//	for (i = 0; i < (length - 1); i++)
+//		TempCrc ^= aData[i];
+//
+//    aData[length-1] = TempCrc;
+  
+//#ifdef USING_APP_MEM
+    Mem_Write_Data(sMemVar.Type_u8, _MEM_DATA_EVENT, 0, aData, length, sRecEvent.Size_u16);
+//#endif
+  }
+}
+/*=====================Packet Parameter TNMT====================*/
+void AppSensor_Packet_TNMT(void)
+{
+//    uint8_t tnstatus_u8 = 0x00;  
+//    char aPAY_LOAD[MAX_MEM_DATA] = {0};
+////    int8_t chann = 0, i = 0, cPack = 0, mPack = false;
+//    char aTEMP[48] = {0};
+//    
+////    char pathtest[40] = "SV";
+////    char aName[40] = {0};
+////    static uint32_t cFile = 0;
+//    uint8_t c_pack = 0;
+//    char File_Name[MAX_LENGTH_FILE_NAME] = {0};
+//    int8_t chann = 0;
+//    uint32_t length = 0;
+//    
+//    char File_Folder[MAX_LENGTH_FILE_NAME] = {0};
+//    
+//    chann = AppWm_Is_Firt_Chann_TN();
+//    if (chann >= 0) 
+//    {
+//        for(uint8_t i = _SS_TEMP; i<_END_SENSOR; i++)
+//        {
+//            if(sMeasureMain[0][i].sUser != 0)
+//            {
+//                c_pack++;
+//                tnstatus_u8 = sMeasureMain[0][i].State;
+//                AppSensor_Packet_Param(aTEMP, i);
+//                sprintf(aPAY_LOAD + strlen(aPAY_LOAD), "%s\t%s\t%04d%02d%02d%02d%02d%02d\t%02d\n", 
+//                                        sMeasureMain[0][i].Name, aTEMP,
+//                                        sRTC.year + 2000, sRTC.month, sRTC.date,
+//                                        sRTC.hour, sRTC.min, sRTC.sec,
+//                                        tnstatus_u8);
+//            }
+//        }
+//        
+//        if(c_pack > 0)
+//        {
+//            Mem_Write_Data(sMemVar.Type_u8, _MEM_DATA_GPS, 0, 
+//            (uint8_t *) aPAY_LOAD, strlen(aPAY_LOAD), sRecGPS.Size_u16);
+//            
+//            chann = AppWm_Is_Firt_Chann_TN();
+//            if (chann >= 0) {
+//                length = strlen(sWmVar.sChannInfor[chann].MA_TINH) 
+//                        + strlen(sWmVar.sChannInfor[chann].MA_CTRINH) + strlen(sWmVar.sChannInfor[chann].MA_TRAM); 
+//                
+//                if (length < MAX_LENGTH_FILE_NAME ) {
+//                    sprintf(File_Name, "%s_%s_%s_", sWmVar.sChannInfor[chann].MA_TINH, 
+//                                        sWmVar.sChannInfor[chann].MA_CTRINH, sWmVar.sChannInfor[chann].MA_TRAM);
+//                    
+//                    sprintf(File_Folder, "%s_%s_%s_", sWmVar.sChannInfor[chann].MA_TINH, 
+//                                         sWmVar.sChannInfor[chann].MA_CTRINH, sWmVar.sChannInfor[chann].MA_TRAM);
+//                }
+//                sprintf(File_Name + strlen(File_Name), "%04d%02d%02d.txt", sRTC.year + 2000, sRTC.month, sRTC.date);
+//                sprintf(File_Folder + strlen(File_Folder), "%04d%02d", sRTC.year + 2000, sRTC.month);
+//                
+//                Write_Mem_SDCard(File_Folder, File_Name, aPAY_LOAD);
+//            }
+//        }
+//    }
+}
+//float PH_P = 7.5;
+//float NHN = 0.5;
+//float DO = 6.5;
+//float COD = 0.52;
+//float TSS = 25.5;
+uint8_t AppSensor_Packet_Param (char *pdata, uint8_t chann)
+{
+//    sMeasureMain[0][_SS_PH].Value_f = PH_P;
+//    sMeasureMain[0][_SS_NH4].Value_f = NHN;
+//    sMeasureMain[0][_SS_DO].Value_f = DO;
+//    sMeasureMain[0][_SS_COD].Value_f = COD;
+//    sMeasureMain[0][_SS_TSS].Value_f = TSS;
+    sprintf(pdata, "%.3lf\t%s", sMeasureMain[0][chann].Value_f , sMeasureMain[0][chann].Unit);
+
+#ifdef USING_NUMBER_COMMA
+    // doi dau '.' thanh dau ','
+    for(char *p = pdata; *p != '\0'; p++)
+    {
+        if(*p == '.')
+        {
+            *p = ',';
+            break; 
+        }
+    }
+#endif
+    return 1;
+}
+
+/*==================Handle Define AT command=================*/
+#ifdef USING_AT_CONFIG
+void AT_CMD_Get_Time_Warning_Sensor(sData *str, uint16_t Pos)
+{
+    uint8_t aTemp[50] = "TimeWarningSensor: ";   //13 ki tu dau tien
+    sData StrResp = {&aTemp[0], 19}; 
+
+    Convert_Uint64_To_StringDec (&StrResp, (uint64_t) (DurationTimeWarningSensor), 0);
+    Insert_String_To_String(StrResp.Data_a8, &StrResp.Length_u16, (uint8_t*)" min",0 , 4);
+
+//	Modem_Respond(PortConfig, StrResp.Data_a8, StrResp.Length_u16, 0);
+    Modem_Respond_Str(PortConfig, (char*)aTemp, 0);
+}
+
+void AT_CMD_Set_Time_Warning_Sensor (sData *str_Receiv, uint16_t Pos)
+{
+    uint32_t TempU32 = 0;
+    if( str_Receiv->Data_a8[0] >= '0' && str_Receiv->Data_a8[0] <= '9')
+    {
+        uint8_t length = 0;
+        for(uint8_t i = 0; i < str_Receiv->Length_u16; i++)
+        {
+            if( str_Receiv->Data_a8[i] < '0' || str_Receiv->Data_a8[i]>'9') break;
+            else length++;
+        }
+        TempU32 = Convert_String_To_Dec(str_Receiv->Data_a8 , length);
+        if(TempU32 <=255 && TempU32 >=1)
+        {
+            Save_TimeWarningSensor(TempU32);
+            Modem_Respond_Str(PortConfig, (char*)"OK", 0);
+        }
+        else
+        {
+            Modem_Respond_Str(PortConfig, (char*)"ERROR", 0);
+        }
+    }
+    else
+    {
+        Modem_Respond_Str(PortConfig, (char*)"ERROR", 0);
+    }
+}
+
+void AT_CMD_Get_State_Sensor(sData *str, uint16_t Pos)
+{
+    uint8_t aTemp[200] = "State: ";   //11 ki tu dau tien
+    uint16_t length = 7;
+    
+    for (uint8_t j = 0; j < MAX_CHANNEL_SS; j++)
+    {
+        for (uint8_t i = 1; i < _END_SENSOR; i++)   
+        {
+            Insert_String_To_String(aTemp, &length,(uint8_t*)" ", 0, 1);
+            Insert_String_To_String(aTemp, &length,(uint8_t*)sMeasureMain[j][i].Name, 0,strlen(sMeasureMain[j][i].Name));
+            Insert_String_To_String(aTemp, &length,(uint8_t*)":", 0, 1);
+
+            Convert_Point_Int_To_String_Scale(aTemp,&length,(int)(sMeasureMain[j][i].sConnect_u8), 0x00);     
+        }
+        Insert_String_To_String(aTemp, &length,(uint8_t*)"\r\n", 0, 2);
+    }
+
+//    Modem_Respond(PortConfig, aTemp, length, 0);
+    Modem_Respond_Str(PortConfig, (char*)aTemp, 0);
+}
+
+void AT_CMD_Get_Measure_Value (sData *str_Receiv, uint16_t Pos)
+{
+    uint8_t aTemp[300] = "Measure_Value: ";   //11 ki tu dau tien
+    uint16_t length = 15;
+    for (uint8_t j = 0; j < MAX_CHANNEL_SS; j++)
+    {
+        for (uint8_t i = 1; i < _END_SENSOR; i++)   
+        {
+            Insert_String_To_String(aTemp, &length,(uint8_t*)" ", 0, 1);
+            Insert_String_To_String(aTemp, &length,(uint8_t*)sMeasureMain[j][i].Name, 0,strlen(sMeasureMain[j][i].Name));
+            Insert_String_To_String(aTemp, &length,(uint8_t*)":", 0, 1);
+
+            Convert_Point_Int_To_String_Scale(aTemp,&length,(int)(sMeasureMain[j][i].Value_f*100), 0xFE);  
+        }
+        Insert_String_To_String(aTemp, &length,(uint8_t*)"\r\n", 0, 2);
+    }
+
+//    Modem_Respond(PortConfig, aTemp, length, 0);
+    Modem_Respond_Str(PortConfig, (char*)aTemp, 0);
+}
+
+void AT_CMD_Get_Measure_Filter (sData *str_Receiv, uint16_t Pos)
+{
+    uint8_t aTemp[300] = "Measure_Filter: ";   //11 ki tu dau tien
+    uint16_t length = 16;
+    for (uint8_t j = 0; j < MAX_CHANNEL_SS; j++)
+    {
+        for (uint8_t i = 1; i < _END_SENSOR; i++)   
+        {
+            Insert_String_To_String(aTemp, &length,(uint8_t*)" ", 0, 1);
+            Insert_String_To_String(aTemp, &length,(uint8_t*)sMeasureMain[j][i].Name, 0,strlen(sMeasureMain[j][i].Name));
+            Insert_String_To_String(aTemp, &length,(uint8_t*)":", 0, 1);
+
+            Convert_Point_Int_To_String_Scale(aTemp,&length,(int)(sMeasureMain[j][i].sVal.Value_i32), sMeasureMain[j][i].sVal.Scale_u8);
+        }
+        Insert_String_To_String(aTemp, &length,(uint8_t*)"\r\n", 0, 2);
+    }
+//    Modem_Respond(PortConfig, aTemp, length, 0);
+    Modem_Respond_Str(PortConfig, (char*)aTemp, 0);
+}
+
+void AT_CMD_Get_Measure_Average (sData *str_Receiv, uint16_t Pos)
+{
+    uint8_t aTemp[300] = "Measure_Average: ";   //11 ki tu dau tien
+    uint16_t length = 17;
+    
+    for (uint8_t j = 0; j < MAX_CHANNEL_SS; j++)
+    {
+        for (uint8_t i = 1; i < _END_SENSOR; i++)   
+        {
+            Insert_String_To_String(aTemp, &length,(uint8_t*)" ", 0, 1);
+            Insert_String_To_String(aTemp, &length,(uint8_t*)sMeasureMain[j][i].Name, 0,strlen(sMeasureMain[j][i].Name));
+            Insert_String_To_String(aTemp, &length,(uint8_t*)":", 0, 1);
+
+            Convert_Point_Int_To_String_Scale(aTemp,&length,(int)(sMeasureMain[j][i].Value_f*100), 0xFE); 
+        }
+        Insert_String_To_String(aTemp, &length,(uint8_t*)"\r\n", 0, 2);
+    }
+
+//    Modem_Respond(PortConfig, aTemp, length, 0);
+    Modem_Respond_Str(PortConfig, (char*)aTemp, 0);
+}
+
+void AT_CMD_Set_Reset_Average (sData *str_Receiv, uint16_t Pos)
+{
+//    uint8_t aTemp[300] = "Reset_Average: OK";   //11 ki tu dau tien
+////    uint16_t length = 17;
+//    
+//    for(uint8_t i = 0; i < _END_SENSOR; i++)
+//    {
+//        UTIL_MEM_set(&sAverageOneHour[i], 0, sizeof(Struct_AverageOneHour));
+//    }
+//    OnchipFlashPageErase(ADDR_VALUE_AVG_ONE_HOUR);
+//
+////    Modem_Respond(PortConfig, aTemp, length, 0);
+//    Modem_Respond_Str(PortConfig, (char*)aTemp, 0);
+}
+
+void AT_CMD_Get_User_Sensor (sData *str_Receiv, uint16_t Pos)
+{
+    uint8_t aTemp[200] = "User: ";   //11 ki tu dau tien
+    uint16_t length = 6;
+    
+    for (uint8_t j = 0; j < MAX_CHANNEL_SS; j++)
+    {
+        for (uint8_t i = 0; i < _END_SENSOR; i++)   
+        {
+            Insert_String_To_String(aTemp, &length,(uint8_t*)" ", 0, 1);
+            Insert_String_To_String(aTemp, &length,(uint8_t*)sMeasureMain[j][i].Name, 0,strlen(sMeasureMain[j][i].Name));
+            Insert_String_To_String(aTemp, &length,(uint8_t*)":", 0, 1);
+
+            Convert_Point_Int_To_String_Scale(aTemp,&length,(int)(sMeasureMain[j][i].sUser), 0x00);
+        }
+        Insert_String_To_String(aTemp, &length,(uint8_t*)"\r\n", 0, 2);
+    }
+
+//    Modem_Respond(PortConfig, aTemp, length, 0);
+    Modem_Respond_Str(PortConfig, (char*)aTemp, 0);
+}
+
+            
+void AT_CMD_Set_User_Sensor (sData *str_Receiv, uint16_t Pos)
+{
+    uint32_t TempU32_0 = 255;
+    uint32_t TempU32_1 = 255; 
+    uint32_t TempU32_2 = 255;
+    if( str_Receiv->Data_a8[0] >= '0' && str_Receiv->Data_a8[0] <= '9')
+    {
+        uint8_t length_0 = 0;
+        uint8_t length_1 = 0;
+        uint8_t length_2 = 0;
+        for(uint8_t i = 0; i < str_Receiv->Length_u16; i++)
+        {
+            if( str_Receiv->Data_a8[i] < '0' || str_Receiv->Data_a8[i]>'9') break;
+            else length_0++;
+        }
+        if(length_0 > 0)
+            TempU32_0 = Convert_String_To_Dec(str_Receiv->Data_a8 , length_0);
+
+        for(uint8_t i = length_0+1; i < str_Receiv->Length_u16; i++)
+        {
+            if( str_Receiv->Data_a8[i] < '0' || str_Receiv->Data_a8[i]>'9') break;
+            else length_1++;
+        }
+        if(length_1 > 0)
+            TempU32_1 = Convert_String_To_Dec(&str_Receiv->Data_a8[length_0+1] , length_1);
+        
+        for(uint8_t i = length_1+1; i < str_Receiv->Length_u16; i++)
+        {
+            if( str_Receiv->Data_a8[i] < '0' || str_Receiv->Data_a8[i]>'9') break;
+            else length_2++;
+        }
+        if(length_2 > 0)
+            TempU32_2 = Convert_String_To_Dec(&str_Receiv->Data_a8[length_0 + 1 + length_1+1] , length_2);
+        
+        if(TempU32_0 < MAX_CHANNEL_SS && TempU32_1 < _END_SENSOR && TempU32_2 <= 250)
+        {
+            Save_UserSensor(TempU32_0, TempU32_1, TempU32_2);
+            Modem_Respond_Str(PortConfig, (char*)"OK", 0);
+        }
+        else
+        {
+            Modem_Respond_Str(PortConfig, (char*)"ERROR", 0);
+        }
+    }
+    else
+    {
+        Modem_Respond_Str(PortConfig, (char*)"ERROR", 0);
+    }
+}
+
+void AT_CMD_Get_Send_GPS(sData *str, uint16_t Pos)
+{
+    uint8_t aTemp[50] = "iSendGPS: ";   //13 ki tu dau tien
+    sData StrResp = {&aTemp[0], 10}; 
+
+    Convert_Uint64_To_StringDec (&StrResp, (uint64_t) (sRecGPS.iSend_u16), 0);
+    Insert_String_To_String(StrResp.Data_a8, &StrResp.Length_u16, (uint8_t*)" iSaveGPS: ",0 , 11);
+
+    Convert_Uint64_To_StringDec (&StrResp, (uint64_t) (sRecGPS.iSave_u16), 0);
+    Insert_String_To_String(StrResp.Data_a8, &StrResp.Length_u16, (uint8_t*)" \r\n",0 , 3);
+    
+//	Modem_Respond(PortConfig, StrResp.Data_a8, StrResp.Length_u16, 0);
+    Modem_Respond_Str(PortConfig, (char*)aTemp, 0);
+}
+#endif
+
+/*---------------------Save and Init User Sensor----------------------*/
+void Save_UserSensor(uint8_t channel, uint8_t KindSensor, uint8_t State)
+{
+    uint8_t aBuff[1024] = {0};
+    uint8_t length = 0;
+    
+    aBuff[length++] = BYTE_WRITEN;
+    if(KindSensor < _END_SENSOR)
+        sMeasureMain[channel][KindSensor].sUser = State;
+    
+    for (uint8_t j = 0; j < MAX_CHANNEL_SS; j++)
+    {
+        for(uint8_t i = 0; i < _END_SENSOR; i++)
+        {
+            aBuff[length++] = sMeasureMain[j][i].sUser;
+        }
+    }
+    
+#ifdef INFOR_ON_FLASH
+    OnchipFlashPageErase(ADDR_USER_SENSOR);
+    OnchipFlashWriteData(ADDR_USER_SENSOR, &aBuff[0], 1024);
+#endif  
+    
+    
+#ifdef INFOR_EX_EEPROM
+    CAT24Mxx_Write_Buff(CAT_ADDR_USER_SENSOR, aBuff, 1024);
+#endif
+    
+#ifdef INFOR_EX_FLASH
+    eFlash_S25FL_Erase_Sector(FLASH_ADDR_USER_SENSOR);
+    eFlash_S25FL_BufferWrite(aBuff, FLASH_ADDR_USER_SENSOR, 1024);
+#endif
+}
+
+void Init_UserSensor(void)
+{
+    uint8_t temp = 0, mRead = true;
+    uint8_t aBuff[1024] = {0};
+    
+#ifdef INFOR_ON_FLASH
+    OnchipFlashReadData(ADDR_THRESH_MEAS, &aBuff[0], 1024);
+#endif
+    
+#ifdef INFOR_EX_EEPROM
+    if (CAT24Mxx_Read_Array(CAT_ADDR_USER_SENSOR, aBuff, 1024) == false) {
+       mRead = false;
+    }
+#endif
+    
+#ifdef INFOR_EX_FLASH
+    if (eFlash_S25FL_BufferRead(aBuff, FLASH_ADDR_USER_SENSOR, 1024) == false) {
+         mRead = false;
+    }
+#endif
+    
+    temp = aBuff[0];
+    if ( mRead == true ) {
+        if (temp == BYTE_WRITEN) 
+        {
+            for (uint8_t j = 0; j < MAX_CHANNEL_SS; j++)
+            {
+                for(uint8_t i = 0; i < _END_SENSOR; i++)
+                {
+                    sMeasureMain[j][i].sUser = aBuff[1 + i + j*_END_SENSOR];
+                    if(sMeasureMain[j][i].sUser > 10)   // Gioi han 10 kenh
+                        sMeasureMain[j][i].sUser = 0;
+                }
+            }
+        }
+        else
+        {
+            for (uint8_t j = 0; j < MAX_CHANNEL_SS; j++)
+            {
+                for(uint8_t i = 0; i < _END_SENSOR; i++)
+                {
+                    sMeasureMain[j][i].sUser = 0;
+                }
+            }
+        }
+    }
+    
+}
+/*===================Save and Init Offset Measure=================*/
+void Save_OffsetMeasure(uint8_t KindOffset, float Var_Offset_f)
+{
+#ifdef USING_INTERNAL_MEM
+//    uint8_t aData[300] = {0};
+//    uint8_t length = 0;
+//    
+//    uint32_t Stamp_Hex = 0;
+//   
+//    if(KindOffset < _END_SENSOR && KindOffset > 0)
+//        sMeasureMain[KindOffset].Offset_f = Var_Offset_f;
+//    
+//    for(uint8_t i = _SS_PH; i < _END_SENSOR; i++)
+//    {
+//        Stamp_Hex = Handle_Float_To_hexUint32(sMeasureMain[i].Offset_f);
+//        aData[length++] = Stamp_Hex >> 24;
+//        aData[length++] = Stamp_Hex >> 16;
+//        aData[length++] = Stamp_Hex >> 8;
+//        aData[length++] = Stamp_Hex ;
+//    }
+//    
+//    Save_Array(ADDR_OFFSET_MEASURE, aData, length);
+#endif
+}
+
+void Init_OffsetMeasure(void)
+{
+#ifdef USING_INTERNAL_MEM
+//    uint32_t Stamp_Hex = 0;
+//    
+//    if(*(__IO uint8_t*)(ADDR_OFFSET_MEASURE) != FLASH_BYTE_EMPTY)
+//    {
+//        for(uint8_t i = _SS_PH; i < _END_SENSOR; i++)
+//        {
+//            Stamp_Hex   = *(__IO uint8_t*)(ADDR_OFFSET_MEASURE+2 + (i-1)*4) << 24;
+//            Stamp_Hex  |= *(__IO uint8_t*)(ADDR_OFFSET_MEASURE+3 + (i-1)*4)<< 16;
+//            Stamp_Hex  |= *(__IO uint8_t*)(ADDR_OFFSET_MEASURE+4 + (i-1)*4)<< 8;
+//            Stamp_Hex  |= *(__IO uint8_t*)(ADDR_OFFSET_MEASURE+5 + (i-1)*4);
+//            if(Stamp_Hex != 0xFFFFFFFF)
+//                Convert_uint32Hex_To_Float(Stamp_Hex,  &sMeasureMain[i].Offset_f);
+//            else
+//                sMeasureMain[i].Offset_f = 0;
+//        }
+//    }
+//    else
+//    {
+//        for(uint8_t i = _SS_PH; i < _END_SENSOR; i++)
+//            sMeasureMain[i].Offset_f = 0;
+//    }
+#endif    
+}
+
+/*====================Save and Init Time Warning==================*/
+void Save_TimeWarningSensor(uint8_t Duration)
+{
+#ifdef USING_INTERNAL_MEM
+//    uint8_t aData[8] = {0};
+//    uint8_t length = 0;
+//    
+//    DurationTimeWarningSensor = Duration;
+//    
+//    aData[length++] = DurationTimeWarningSensor;
+//
+//    Save_Array(ADDR_TIME_WARNING_SENSOR, aData, length);
+#endif
+}
+
+void Init_TimeWarningSensor(void)
+{
+#ifdef USING_INTERNAL_MEM
+//    if(*(__IO uint8_t*)(ADDR_TIME_WARNING_SENSOR) != FLASH_BYTE_EMPTY)
+//    {
+//        DurationTimeWarningSensor = *(__IO uint8_t*)(ADDR_TIME_WARNING_SENSOR+2);
+//    }
+//    else
+//    {
+//        DurationTimeWarningSensor = TIME_RESEND_WARNING;
+//    }
+#endif    
+}
+/*================Save and Init Value Average One Hour==============*/
+void Save_AverageOneHour(void)
+{
+#ifdef USING_INTERNAL_MEM
+//    uint8_t aData[200] = {0};
+//    uint16_t length = 0;
+//    uint32_t Stamp_Hex = 0;
+//    
+//    for(uint8_t i = 0; i < _END_SENSOR; i++)
+//    {
+//        Stamp_Hex = Handle_Float_To_hexUint32(sAverageOneHour[i].Sum_Value_f);
+//        
+//        aData[length++] = sAverageOneHour[i].Year_Before;
+//        aData[length++] = sAverageOneHour[i].Month_Before;
+//        aData[length++] = sAverageOneHour[i].Date_Before;
+//        aData[length++] = sAverageOneHour[i].Hour_Before;
+//        aData[length++] = sAverageOneHour[i].Num_Success;
+//        aData[length++] = sAverageOneHour[i].Num_Error;
+//        
+//        aData[length++] = Stamp_Hex >> 24;
+//        aData[length++] = Stamp_Hex >> 16;
+//        aData[length++] = Stamp_Hex >> 8;
+//        aData[length++] = Stamp_Hex ;
+//    }
+//
+//    Save_Array(ADDR_VALUE_AVG_ONE_HOUR, aData, length);
+#endif
+}
+
+void Init_AverageOneHour(void)
+{
+#ifdef USING_INTERNAL_MEM
+//    uint32_t Stamp_Hex = 0;
+//    
+//    if(*(__IO uint8_t*)(ADDR_VALUE_AVG_ONE_HOUR) != FLASH_BYTE_EMPTY)
+//    {
+//        for(uint8_t i = 0; i < _END_SENSOR; i++)
+//        {
+//            sAverageOneHour[i].Year_Before = *(__IO uint8_t*)(ADDR_VALUE_AVG_ONE_HOUR+2+i*10);
+//            sAverageOneHour[i].Month_Before = *(__IO uint8_t*)(ADDR_VALUE_AVG_ONE_HOUR+3+i*10);
+//            sAverageOneHour[i].Date_Before = *(__IO uint8_t*)(ADDR_VALUE_AVG_ONE_HOUR+4+i*10);
+//            sAverageOneHour[i].Hour_Before = *(__IO uint8_t*)(ADDR_VALUE_AVG_ONE_HOUR+5+i*10);
+//            sAverageOneHour[i].Num_Success = *(__IO uint8_t*)(ADDR_VALUE_AVG_ONE_HOUR+6+i*10);
+//            sAverageOneHour[i].Num_Error = *(__IO uint8_t*)(ADDR_VALUE_AVG_ONE_HOUR+7+i*10);
+//              
+//            Stamp_Hex   = *(__IO uint8_t*)(ADDR_VALUE_AVG_ONE_HOUR+8 + i*10) << 24;
+//            Stamp_Hex  |= *(__IO uint8_t*)(ADDR_VALUE_AVG_ONE_HOUR+9 + i*10) << 16;
+//            Stamp_Hex  |= *(__IO uint8_t*)(ADDR_VALUE_AVG_ONE_HOUR+10 + i*10) << 8;
+//            Stamp_Hex  |= *(__IO uint8_t*)(ADDR_VALUE_AVG_ONE_HOUR+11 + i*10);
+//            
+//            if(Stamp_Hex != 0xFFFFFFFF)
+//                Convert_uint32Hex_To_Float(Stamp_Hex,  &sAverageOneHour[i].Sum_Value_f);
+//            else
+//                sAverageOneHour[i].Sum_Value_f = 0;
+//        }
+//    }
+//    else
+//    {
+//        for(uint8_t i = 0; i < _END_SENSOR; i++)
+//        {
+//            UTIL_MEM_set(&sAverageOneHour[i], 0, sizeof(Struct_AverageOneHour));
+//        }
+//    }
+#endif    
+}
+
+uint32_t ConvertToHours(uint8_t year, uint8_t month, uint8_t day, uint8_t hour)
+{
+    static const uint8_t daysInMonth[12] =
+        {31,28,31,30,31,30,31,31,30,31,30,31};
+
+    uint32_t days = 0;
+    uint16_t year_full = 2000 + year;
+
+    // Cong so ngay cua cac nam truoc
+    for(uint16_t y = 2000; y < year_full; y++)
+        days += IsLeapYear(y) ? 366 : 365;
+
+    // Cong so ngay cua cac thang truoc
+    for(uint8_t m = 1; m < month; m++)
+    {
+        if(m == 2 && IsLeapYear(year_full))
+            days += 29;
+        else
+            days += daysInMonth[m-1];
+    }
+
+    days += (day - 1);
+
+    return days * 24UL + hour;
+}
+
+void Average_One_Hour(void)
+{
+//    float temp_f = 0;
+//    uint8_t Scale = 0;
+//    uint32_t Count_Time_Current = 0;
+//    uint32_t Count_Time_Before = 0;
+//    uint8_t Count_Handle = 0;           //Tinh tong so lan xu ly
+//    
+//    Count_Handle++;
+//    Count_Time_Current = ConvertToHours(sRTC.year, sRTC.month, sRTC.date, sRTC.hour);
+//    Count_Time_Before = ConvertToHours(sAverageOneHour[0].Year_Before, sAverageOneHour[0].Month_Before, 
+//                                       sAverageOneHour[0].Date_Before, sAverageOneHour[0].Hour_Before);
+//    
+//    if(Count_Time_Current - Count_Time_Before > 1)
+//    {
+//        for(uint8_t i = 0; i < _END_SENSOR; i++)
+//        {
+//            UTIL_MEM_set(&sAverageOneHour[i], 0, sizeof(Struct_AverageOneHour));
+//        }
+//        OnchipFlashPageErase(ADDR_VALUE_AVG_ONE_HOUR);
+//    }
+//
+//    if(StateCalibSensor == _E_DANG_DO)
+//    {
+//        if(sDataSensorMeasure.sTemp.State_u8 == 1)
+//        {
+//            temp_f = (float)sDataSensorMeasure.sTemp.Value_i32;
+//            Scale = sDataSensorMeasure.sTemp.Scale_u8;
+//            sAverageOneHour[0].Sum_Value_f += temp_f/(float)Calculator_Scale(Scale);
+//            sAverageOneHour[0].Num_Success++;
+//        }
+//        else
+//        {
+//            sAverageOneHour[0].Num_Error++;
+//        }
+//        sAverageOneHour[0].Year_Before = sRTC.year;
+//        sAverageOneHour[0].Month_Before = sRTC.month;
+//        sAverageOneHour[0].Date_Before = sRTC.date;
+//        sAverageOneHour[0].Hour_Before = sRTC.hour;
+//        
+//        for(uint8_t i = 1; i< _END_SENSOR; i++)
+//        {
+//            if(sMeasureMain[i].sMeasureHanlde->State_u8 == 1)
+//            {
+//                temp_f = (float)sMeasureMain[i].sMeasureHanlde->Value_i32;
+//                Scale = sMeasureMain[i].sMeasureHanlde->Scale_u8;
+//                sAverageOneHour[i].Sum_Value_f += temp_f/(float)Calculator_Scale(Scale);
+//                sAverageOneHour[i].Num_Success++;
+//            }
+//            else
+//            {
+//                sAverageOneHour[i].Num_Error++;
+//            }
+//            sAverageOneHour[i].Year_Before = sRTC.year;
+//            sAverageOneHour[i].Month_Before = sRTC.month;
+//            sAverageOneHour[i].Date_Before = sRTC.date;
+//            sAverageOneHour[i].Hour_Before = sRTC.hour;
+//        }
+//        
+//        for(uint8_t i = 0; i < _END_SENSOR; i++)
+//        {
+//            if(sAverageOneHour[i].Num_Success > 0 && sAverageOneHour[i].Num_Success >= sAverageOneHour[i].Num_Error)
+//            {
+//                sMeasureMain[i].State = _E_DANG_DO;
+//                sMeasureMain[i].Value_f = sAverageOneHour[i].Sum_Value_f/sAverageOneHour[i].Num_Success;
+//            }
+//            else
+//            {
+//                sMeasureMain[i].State = _E_BAO_LOI_THIET_BI;
+//                sMeasureMain[i].Value_f = 0;
+//            }
+//        }
+//    }
+//    else
+//    {
+//        for(uint8_t i = 0; i < _END_SENSOR; i++)
+//            sMeasureMain[i].State = StateCalibSensor;
+//    }
+//    
+//    if(sRTC.min % 2 == 0 || Count_Handle > 120)
+//    {
+//        for(uint8_t i = 0; i < _END_SENSOR; i++)
+//        {
+//            UTIL_MEM_set(&sAverageOneHour[i], 0, sizeof(Struct_AverageOneHour));
+//        }
+//        OnchipFlashPageErase(ADDR_VALUE_AVG_ONE_HOUR);
+//        Count_Handle = 0;
+//    }
+//       
+//    Save_AverageOneHour();
+}
+
+
+/*=====================Sensor Packet Data=====================*/
+/*
+    @brief  Log Data TSVH
+*/
+void AppSensor_Log_Data_TSVH (void)
+{
+//  if(sRTC.year > 20)
+//  {
+//    uint8_t     aMessData[256] = {0};
+//    uint8_t     Length = 0;
+//
+//    Length = SensorRS485_Packet_TSVH (&aMessData[0]);
+//    Mem_Write_Data(sMemVar.Type_u8, _MEM_DATA_TSVH, 0, aMessData, Length, sRecTSVH.Size_u16);
+//  }
+  
+    uint8_t aTEMP_PAYLOAD[512] = {0};
+    sData pData = {aTEMP_PAYLOAD, 0};
+    uint16_t i = 0, posindex = 0, length = 0;
+    uint8_t count = 0;
+    static uint16_t size_pack = 0;
+    
+    for (i = 0; i < MAX_CHANNEL_SS; i++)
+    {
+        posindex = pData.Length_u16;
+        pData.Length_u16 += 2;
+        
+        length = SensorRS485_Packet_TSVH(&pData, i);
+        
+        if(length > 0)
+        {
+            *(pData.Data_a8 + posindex) = count + 1;
+            *(pData.Data_a8 + posindex + 1) = length;
+        }
+        else 
+            pData.Length_u16 -= 2;
+    
+        if (count == 0) {
+            size_pack = pData.Length_u16;
+        }
+        
+        count++;
+
+        //gop 2 ban tin voi nhau. hoac cuoi cung
+        if ( (count > 0) &&
+            ( (size_pack + pData.Length_u16 + 5) > sRecTSVH.Size_u16 ) ||  ( (i + 1) >= MAX_CHANNEL_SS ) )
+        {
+            count = 0;
+            
+            Mem_Write_Data(sMemVar.Type_u8, _MEM_DATA_TSVH, 0, 
+                      pData.Data_a8, pData.Length_u16, sRecTSVH.Size_u16);
+            
+            //reset buff 
+            Reset_Buff(&pData);
+        }
+    }
+}
+/*
+    @brief  Packet TSVH
+*/
+uint8_t SensorRS485_Packet_TSVH (sData *pData, uint8_t channel)
+{
+    uint8_t Result = 0;
+    uint16_t stamp = 0;
+    for(uint8_t i = 0; i < _END_SENSOR; i++)
+    {
+        if(sMeasureMain[channel][i].sUser != 0)
+            Result = 1;
+    }
+    
+    if(Result == 0 && channel > 0)
+        return 0;
+  
+    uint16_t FistPos = pData->Length_u16;
+    uint16_t i = 0;
+    uint8_t TempCrc = 0;
+    uint8_t strChanel[] = {"0001"};
+    //----------sTime--------------------
+    SV_Protocol_Packet_Data(pData->Data_a8, &pData->Length_u16, OBIS_TIME_DEVICE, &sRTC, 6, 0xAA);
+    //Channel ID
+    strChanel[3] = 0x31 + channel;
+    SV_Protocol_Packet_Data(pData->Data_a8, &pData->Length_u16, OBIS_SERI_SENSOR, &strChanel, 4, 0xAA);
+    
+    for(uint8_t i = 0; i < _END_SENSOR; i++)
+    {
+        if(sMeasureMain[channel][i].nConnect_u8 == _SENSOR_CONNECT)
+            Sensor_Packet_Data(pData->Data_a8, &pData->Length_u16, sMeasureMain[channel][i].Obis, 
+                               &sMeasureMain[channel][i].sVal.Value_i32, sMeasureMain[channel][i].sVal.Scale_u8);
+    }
+    
+    pData->Data_a8[pData->Length_u16++] = OBIS_SENSOR_STATUS;
+    stamp = pData->Length_u16;
+    pData->Data_a8[pData->Length_u16++] = 0;
+    
+    for(uint8_t i = 0; i < _END_SENSOR; i++)
+    {
+        if(sMeasureMain[channel][i].sUser != 0)
+        {
+            Sensor_Packet_Status(pData->Data_a8, &pData->Length_u16, sMeasureMain[channel][i].Obis, 
+                                &sMeasureMain[channel][i].State, 0xAA);
+            pData->Data_a8[stamp] += 2;
+        }
+    }
+    
+    //----------Dien ap Pin--------------------
+    SV_Protocol_Packet_Data(pData->Data_a8, &pData->Length_u16, OBIS_DEV_VOL1, &sBattery.mVol_u32, 2, 0xFD);
+    
+    //----------Cuong do song--------------------
+#ifdef USING_APP_SIM
+    SV_Protocol_Packet_Data(pData->Data_a8, &pData->Length_u16, OBIS_RSSI_1, &sSimCommInfor.RSSI_u8, 1, 0x00);
+#endif
+    
+    //----------Dien ap Pin--------------------
+//    SV_Protocol_Packet_Data(pData->Data_a8, &pData->Length_u16, OBIS_DEV_VOL2, &sVout.mVol_u32, 2, 0xFD);    
+//    SV_Protocol_Packet_Data(pData->Data_a8, &pData->Length_u16, OBIS_DEV_VOL2, &sModemVar.DuraOpera_u32, 2, 0x00); 
+    
+    //----------Tan suat--------------------
+    SV_Protocol_Packet_Data(pData->Data_a8, &pData->Length_u16, OBIS_FREQ_SEND, &sModemInfor.sFrequence.UnitMin_u16, 2, 0x00);
+    
+    // caculator crc
+    pData->Length_u16++;
+	for (i = FistPos; i < (pData->Length_u16 - 1); i++)
+		TempCrc ^= pData->Data_a8[i];
+
+    pData->Data_a8[pData->Length_u16-1] = TempCrc;
+    
+    return  (pData->Length_u16- FistPos);
+}
+
+/*
+    @brief  Sensor Packet Status
+*/
+void Sensor_Packet_Status(uint8_t *pTarget, uint16_t *LenTarget, uint8_t Obis,
+                        void *pData, uint8_t Scale)
+{
+    uint16_t Pos = *LenTarget;
+    uint8_t LenData = 1;
+
+    pTarget[Pos++] = Obis;
+            
+    switch (Obis)
+    {
+        case OBIS_ENVI_OXY_MG_L:
+        case OBIS_ENVI_OXY_PERCENT:
+        case OBIS_ENVI_TEMP:
+        case OBIS_ENVI_EC:
+        case OBIS_ENVI_SALT:
+        case OBIS_ENVI_PH_WATER:
+        case OBIS_ENVI_SALT_UNIT:
+        case OBIS_ENVI_CLO:
+        case OBIS_ENVI_TURB:
+        case OBIS_ENVI_NH4:
+        case OBIS_ENVI_COD:
+        case OBIS_ENVI_TSS:
+        case OBIS_ENVI_TDS:
+        case OBIS_ENVI_NO3:
+        case OBIS_ENVI_NH4_N:
+        case OBIS_ENVI_NO3_N:
+        case OBIS_ENVI_HUMI_1:
+        case OBIS_ENVI_HUMI_2:
+
+            AppComm_Sub_Packet_Integer(pTarget, &Pos, pData, LenData);
+            
+            if (Scale != 0xAA)
+                pTarget[Pos++] = Scale;
+            break;
+            
+        default:
+            break;
+    }
+    
+    *LenTarget = Pos ;
+}
+
+/*
+    @brief  Sensor Packet Data
+*/
+void Sensor_Packet_Data(uint8_t *pTarget, uint16_t *LenTarget, uint8_t Obis,
+                        void *pData, uint8_t Scale)
+{
+    uint16_t Pos = *LenTarget;
+    uint8_t LenData = 0;
+    int32_t Data_i32 = 0;
+    
+    Data_i32 = *(int32_t *)pData;
+    if(Data_i32 > 32767 || Data_i32 < -32768)
+        LenData = 4;
+    else 
+        LenData = 2;
+    
+//    if (LenData == 0)
+//        return;
+    
+    pTarget[Pos++] = Obis;
+    pTarget[Pos++] = LenData;
+            
+    switch (Obis)
+    {
+        case OBIS_ENVI_OXY_MG_L:
+        case OBIS_ENVI_OXY_PERCENT:
+        case OBIS_ENVI_TEMP:
+        case OBIS_ENVI_EC:
+        case OBIS_ENVI_SALT:
+        case OBIS_ENVI_PH_WATER:
+        case OBIS_ENVI_SALT_UNIT:
+        case OBIS_ENVI_CLO:
+        case OBIS_ENVI_TURB:
+        case OBIS_ENVI_NH4:
+        case OBIS_ENVI_COD:
+        case OBIS_ENVI_TSS:
+        case OBIS_ENVI_TDS:
+        case OBIS_ENVI_NO3:
+        case OBIS_ENVI_NH4_N:
+        case OBIS_ENVI_NO3_N:
+        case OBIS_ENVI_HUMI_1:
+        case OBIS_ENVI_HUMI_2:
+          
+            AppComm_Sub_Packet_Integer(pTarget, &Pos, pData, LenData);
+            
+            if (Scale != 0xAA)
+                pTarget[Pos++] = Scale;
+            break;
+            
+        default:
+            break;
+    }
+    
+    *LenTarget = Pos ;
+}
+
+void AppComm_Sub_Packet_Integer (uint8_t *pTarget, uint16_t *LenTarget, void *Data, uint8_t LenData)
+{
+    uint16_t Pos = *LenTarget;
+    
+    uint8_t  *TempU8;
+    uint16_t *TempU16;
+    uint32_t *TempU32;
+    uint64_t *TempU64;
+    
+    switch (LenData)
+    {
+        case 1:    
+            TempU8 = (uint8_t *) Data;
+            pTarget[Pos++] = *TempU8;
+            break;
+        case 2:
+            TempU16 = (uint16_t *) Data;
+            pTarget[Pos++] = ((*TempU16) >> 8) & 0xFF;
+            pTarget[Pos++] =  (*TempU16) & 0xFF;
+            break;
+        case 4:
+            TempU32 = (uint32_t *) Data;
+            pTarget[Pos++] = ((*TempU32) >> 24) & 0xFF;
+            pTarget[Pos++] = ((*TempU32) >> 16) & 0xFF;
+            pTarget[Pos++] = ((*TempU32) >> 8) & 0xFF;
+            pTarget[Pos++] =  (*TempU32) & 0xFF;
+            break;
+        case 8:
+            TempU64 = (uint64_t *) Data;
+            pTarget[Pos++] = ((*TempU64) >> 56) & 0xFF;
+            pTarget[Pos++] = ((*TempU64) >> 48) & 0xFF;
+            pTarget[Pos++] = ((*TempU64) >> 40) & 0xFF;
+            pTarget[Pos++] = ((*TempU64) >> 32) & 0xFF;
+            pTarget[Pos++] = ((*TempU64) >> 24) & 0xFF;
+            pTarget[Pos++] = ((*TempU64) >> 16) & 0xFF;
+            pTarget[Pos++] = ((*TempU64) >> 8) & 0xFF;
+            pTarget[Pos++] =  (*TempU64) & 0xFF;
+            break;
+        default:
+            break;
+    }
+    
+    *LenTarget = Pos ;
+}
+
+/*=====================Handle Task and Init app===================*/
+uint8_t AppSensor_Packet_Intan (sData *pData)
+{
+    uint16_t PosIndex = 0, LengthPacket = 0;
+    uint8_t TempCrc = 0;
+    uint16_t i = 0;
+    
+    //Dong goi tung ban tin cac kenh
+    for (i = 0; i < MAX_CHANNEL; i++)
+    {
+        PosIndex = pData->Length_u16;
+        pData->Length_u16 += 2;
+        LengthPacket = SensorRS485_Packet_TSVH(pData, i);
+       
+        *(pData->Data_a8 + PosIndex) = i + 1;
+        *(pData->Data_a8 + PosIndex + 1) = LengthPacket;
+    }
+    
+    // caculator crc
+    pData->Length_u16++;
+	for (i = 0; i < (pData->Length_u16 - 1); i++)
+		TempCrc ^= pData->Data_a8[i];
+
+    pData->Data_a8[pData->Length_u16-1] = TempCrc; 
+
+    return true;
+}
+
+void AppSensor_Off_Energy_Consumption (void)
+{
+    LED_Off (_LED_STATUS);
+    
+    V_PIN_OFF;   //off Power
+    MEASURE_PIN_OFF;
+    
+    RS485_OFF;
+    PULSE_OFF;
+    
+#ifdef BOARD_LC_V1_1
+    HAL_GPIO_WritePin(OTG_ON_OFF_GPIO_Port, OTG_ON_OFF_Pin, GPIO_PIN_SET);
+#endif 
+}
+
+void Active_EntrySensor(void)
+{
+//    PULSE_ON;
+    V_PIN_ON;
+    fevent_enable(sEventAppSensor,_EVENT_SENSOR_ENTRY);
+    fevent_enable(sEventAppSensor,_EVENT_SENSOR_LOG_TSVH);
+}
+void Init_AppSensor(void)
+{
+    Init_AverageOneHour();
+    Init_TimeWarningSensor();
+    Init_OffsetMeasure();
+    Init_UserSensor();
+#ifdef USING_AT_CONFIG
+    /* regis cb serial */
+//    sATCmdList[_GET_FREQ_WARNING_SENSOR].CallBack = AT_CMD_Get_Time_Warning_Sensor;
+//    sATCmdList[_SET_FREQ_WARNING_SENSOR].CallBack = AT_CMD_Set_Time_Warning_Sensor;
+    
+    sATCmdList[_GET_STATE_SENSOR].CallBack = AT_CMD_Get_State_Sensor;
+    
+    sATCmdList[_GET_MEASURE_VALUE].CallBack = AT_CMD_Get_Measure_Value;
+    sATCmdList[_GET_MEASURE_FILTER].CallBack = AT_CMD_Get_Measure_Filter;
+//    sATCmdList[_GET_MEASURE_AVERAGE].CallBack = AT_CMD_Get_Measure_Average;
+//    sATCmdList[_SET_RESET_AVERAGE].CallBack = AT_CMD_Set_Reset_Average,
+    
+    sATCmdList[_GET_USER_SENSOR].CallBack = AT_CMD_Get_User_Sensor;
+    sATCmdList[_SET_USER_SENSOR].CallBack = AT_CMD_Set_User_Sensor;
+    
+//    sATCmdList[_GET_SEND_GPS].CallBack = AT_CMD_Get_Send_GPS;
+#endif
+}
+
+uint8_t AppSensor_Task(void)
+{
+    uint8_t i = 0;
+    uint8_t Result = false;
+    for( i = 0; i < _EVENT_SENSOR_END; i++)
+    {
+        if(sEventAppSensor[i].e_status == 1)
+        {
+            Result = true;
+            if((sEventAppSensor[i].e_systick == 0) ||
+                ((HAL_GetTick() - sEventAppSensor[i].e_systick) >= sEventAppSensor[i].e_period))
+            {
+                sEventAppSensor[i].e_status = 0; //Disable event
+                sEventAppSensor[i].e_systick= HAL_GetTick();
+                sEventAppSensor[i].e_function_handler(i);
+            }
+        }
+    }
+    
+    return Result;
+}
+
+uint8_t AppSS_iPending (void)
+{
+//    if (Check_Time_Out(sWmVar.LandMark_u32, 5000) == true) {
+//        return false;
+//    }
+    
+    return false;
+}
